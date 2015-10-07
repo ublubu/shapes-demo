@@ -1,10 +1,9 @@
 module GameLoop where
 
-import qualified Graphics.UI.SDL.Timer as SDL.Timer
+import qualified SDL.Time
 import Control.Concurrent
 import Control.Monad.State
 import GHC.Word
-import Utils.Utils
 
 testStep :: Integer -> Word32 -> IO Integer
 testStep i t = do
@@ -14,14 +13,15 @@ testStep i t = do
 testTest :: Integer -> Bool
 testTest = (> 5)
 
+testTimedRunWhile :: IO ()
 testTimedRunWhile = do
-  t0 <- SDL.Timer.getTicks
+  t0 <- SDL.Time.ticks
   timedRunUntil t0 1000 0 testTest testStep
 
 updater :: (a -> Word32 -> IO a) -> StateT a IO ()
 updater f = do
   result <- get
-  time <- SDL.Timer.getTicks
+  time <- SDL.Time.ticks
   result' <- liftIO $ f result time
   put result'
   return ()
@@ -29,9 +29,9 @@ updater f = do
 timedUpdater :: Word32 -> (a -> Word32 -> IO a) -> StateT (Word32, a) IO ()
 timedUpdater dt f = do
   (target, s) <- get
-  time <- SDL.Timer.getTicks
+  time <- SDL.Time.ticks
   let wait = target - time in when (target > time) (liftIO $ threadDelay (1000 * fromIntegral wait))
-  time' <- SDL.Timer.getTicks
+  time' <- SDL.Time.ticks
   s' <- liftIO $ f s time'
   put (target + dt, s')
   return ()

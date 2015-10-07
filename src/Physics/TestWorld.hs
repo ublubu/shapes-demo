@@ -2,46 +2,34 @@
 
 module Physics.TestWorld where
 
-import Control.Applicative
 import Control.Monad
 import Control.Lens
-import Data.Bits
-import qualified Graphics.UI.SDL.Types as SDL.T
-import qualified Graphics.UI.SDL.Enum as SDL.E
-import qualified Graphics.UI.SDL.Timer as SDL.Timer
+import EasySDL.Draw
 import GHC.Word
-import Linear.Affine
 import Linear.Epsilon
-import Linear.Matrix hiding (trace)
 import Linear.V2
 import Physics.Broadphase
 import Physics.Constraint
 import Physics.ConstraintSolver
 import Physics.ContactSolver
 import Physics.Contact
-import Physics.Linear
 import Physics.Object
-import Physics.Solver
 import qualified Physics.Solvers as S
 import Physics.Transform
-import Physics.Geometry hiding (Contact)
 import Physics.Draw
 import Physics.DrawWorld
-import Physics.External
 import Physics.World hiding (testWorld)
 import Physics.WorldSolver
-import qualified SDL.Draw as D
-import SDL.Event
-import GameInit
 import GameLoop hiding (testStep)
-import Geometry
+import qualified SDL.Event as E
+import qualified SDL.Time as T
+import qualified SDL.Video.Renderer as R
+import qualified SDL.Input.Keyboard as K
+import qualified SDL.Input.Keyboard.Codes as KC
 import Utils.Utils
 
 import Physics.Scenes.Scene
 import Physics.Scenes.Scenes
-import qualified Physics.Scenes.Rolling as SC
-
-pink = D.CustomRGBA 0xFF 0x3E 0x96 0xFF
 
 data TestState = TestState { _testWorldState :: (World (WorldObj Double), State Double (Cache Double (WorldObj Double)))
                            , _testFinished :: Bool
@@ -67,43 +55,45 @@ initialState i = TestState (scene ^. scWorld, emptyState) False scene i
 timeStep :: Num a => a
 timeStep = 10
 
-renderTest :: SDL.T.Renderer -> TestState -> IO ()
+renderTest :: R.Renderer -> TestState -> IO ()
 renderTest r state = do
-  D.setColor r D.Black
+  setColor r black
   drawWorld r vt (state ^. testWorldState . _1)
 
-renderContacts :: SDL.T.Renderer -> [WorldPair [Flipping (Contact Double)]] -> IO ()
+renderContacts :: R.Renderer -> [WorldPair [Flipping (Contact Double)]] -> IO ()
 renderContacts r ps = sequence_ . join $ fmap f ps
   where f (WorldPair _ fcs) = fmap g fcs
         g = drawContact' r . LocalT vt . flipExtract
 
-testStep :: SDL.T.Renderer -> TestState -> Word32 -> IO TestState
+testStep :: R.Renderer -> TestState -> Word32 -> IO TestState
 testStep r s0 _ = do
-  events <- flushEvents
+  events <- E.pollEvents
   let cs = fmap (generateContacts . toCP) <$> culledPairs (s ^. testWorldState . _1)
       s = foldl handleEvent s0 events & testWorldState %~ uncurry (updateWorld (s0 ^. testScene) dt)
-  D.withBlankScreen r (do
-                           renderTest r s0
-                           D.setColor r pink
-                           renderContacts r cs)
+  withBlankScreen r (do
+                         renderTest r s0
+                         setColor r pink
+                         renderContacts r cs)
   return s
   where dt = fromIntegral timeStep / 1000
 
-handleEvent :: TestState -> SDL.T.Event -> TestState
-handleEvent s0 (SDL.T.QuitEvent _ _) = s0 { _testFinished = True }
-handleEvent s0 (SDL.T.KeyboardEvent evtType _ _ _ _ key)
-  | evtType == SDL.E.SDL_KEYDOWN = handleKeypress s0 (SDL.T.keysymScancode key) (fromIntegral $ SDL.T.keysymMod key)
+handleEvent :: TestState -> E.Event -> TestState
+handleEvent s0 (E.Event _ E.QuitEvent) = s0 { _testFinished = True }
+handleEvent s0 (E.Event _ (E.KeyboardEvent (E.KeyboardEventData _ motion _ key)))
+  | motion == E.Pressed = handleKeypress s0 (K.keysymScancode key) (K.keysymModifier key)
   | otherwise = s0
 handleEvent s0 _ = s0
 
-handleKeypress :: TestState -> SDL.E.Scancode -> SDL.E.Keymod -> TestState
-handleKeypress state SDL.E.SDL_SCANCODE_R _ = initialState (state ^. testSceneIndex)
-handleKeypress state SDL.E.SDL_SCANCODE_N km
-  | km .&. SDL.E.KMOD_SHIFT > 0 = initialState ((state ^. testSceneIndex - 1) `posMod` length (scenes :: [Scene Double (WorldObj Double)]))
+handleKeypress :: TestState -> K.Scancode -> K.KeyModifier -> TestState
+handleKeypress state KC.ScancodeR _ = initialState (state ^. testSceneIndex)
+handleKeypress state KC.ScancodeN km
+  | K.keyModifierLeftShift km || K.keyModifierRightShift km =
+    initialState ((state ^. testSceneIndex - 1)
+                  `posMod` length (scenes :: [Scene Double (WorldObj Double)]))
   | otherwise = initialState ((state ^. testSceneIndex + 1) `mod` length (scenes :: [Scene Double (WorldObj Double)]))
 handleKeypress state _ _ = state
 
-testMain :: SDL.T.Renderer -> IO ()
+testMain :: R.Renderer -> IO ()
 testMain r = do
-  t0 <- SDL.Timer.getTicks
+  t0 <- T.ticks
   timedRunUntil t0 timeStep (initialState 0) _testFinished (testStep r)
